@@ -85,13 +85,13 @@
   .page{max-width:1040px;margin:0 auto}
 
   @media (max-width:899px){
-    .app{grid-template-columns:1fr}
+    .app{grid-template-columns:minmax(0,1fr)}
     .side{display:none}
     .topbar{display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:20;padding:10px 16px;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
     .topbar .brand{padding:0}
     .topbar .next-pill{flex:1;width:auto;padding:7px 10px}
     main{padding:22px 16px calc(96px + env(safe-area-inset-bottom))}
-    .bottom-nav{display:grid;grid-template-columns:repeat(5,1fr);position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+    .bottom-nav{display:grid;grid-template-columns:repeat(var(--n,5),1fr);position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
     .bottom-nav a{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 2px;font-size:11px;font-weight:500;color:var(--muted);text-decoration:none;border-radius:var(--r-sm)}
     .bottom-nav a[aria-current="page"]{color:var(--accent)}
     .bottom-nav svg.i{width:21px;height:21px}
@@ -195,6 +195,7 @@
   .seg label span{height:32px;padding:0 14px;border-radius:7px;display:inline-flex;align-items:center}
   .seg input{position:absolute;opacity:0;pointer-events:none}
   .seg label:has(input:focus-visible) span{outline:2px solid var(--accent)}
+  .banner{display:flex;align-items:center;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;padding:12px 16px;margin-bottom:24px;border-radius:var(--r);background:var(--accent-soft);font-size:14px}
   .result-note{color:var(--muted);font-size:13px;margin:0 0 10px}
 
   /* Порожні стани */
@@ -329,7 +330,7 @@
   <aside class="side" aria-label="Навігація">
     <div class="brand">
       <div class="brand-mark" aria-hidden="true">L</div>
-      <div><div class="brand-name">Кабінет викладача</div><div class="brand-sub" id="side-name"></div></div>
+      <div><div class="brand-name" id="side-title">Кабінет викладача</div><div class="brand-sub" id="side-name"></div></div>
     </div>
     <nav id="side-nav"></nav>
     <div class="side-foot">
@@ -342,7 +343,7 @@
   </aside>
 
   <header class="topbar">
-    <div class="brand"><div class="brand-mark" aria-hidden="true">L</div><span class="brand-name brand-text">Кабінет</span></div>
+    <div class="brand"><div class="brand-mark" aria-hidden="true">L</div><span class="brand-name brand-text" id="top-title">Кабінет</span></div>
     <div id="top-next" style="flex:1;min-width:0;display:flex"></div>
     <button class="icon-btn" data-act="theme" id="theme-btn-top" aria-label="Змінити тему"></button>
     <button class="icon-btn" data-act="settings" aria-label="Налаштування"></button>
@@ -503,7 +504,7 @@ function seed(){
     T('Знайти нові подкасти рівня B1',null,''),
     T('Перевірити ДЗ Даниїла',-2,'s7',true)
   ];
-  return {v:1, students, lessons, plans, materials, tasks, settings:{name:'Ганно', theme:'system'}};
+  return {v:1, students, lessons, plans, materials, tasks, settings:{name:'Ганно', theme:'system', bot:''}};
 }
 
 /* ========== Стан ========== */
@@ -522,6 +523,22 @@ const ui = {
   tasks:{student:'', showDone:false},
   profileTab:'overview'
 };
+const ROLE_KEY = 'teacher-workspace-role';
+let mode = {role:'teacher'};
+const isStudent = () => mode.role === 'student';
+function initRole(){
+  let p = '';
+  try { p = (window.Telegram && Telegram.WebApp.initDataUnsafe && Telegram.WebApp.initDataUnsafe.start_param) || ''; } catch(e){}
+  const q = new URLSearchParams(location.search);
+  p = p || q.get('startapp') || (q.get('s') ? 's_' + q.get('s') : '');
+  if (/^s_[\w-]+$/.test(p)){
+    mode = {role:'student', studentId: p.slice(2)};
+    try { localStorage.setItem(ROLE_KEY, JSON.stringify(mode)); } catch(e){}
+    try { if (q.has('s') || q.has('startapp')) history.replaceState(null, '', location.pathname + location.hash); } catch(e){}
+    return;
+  }
+  try { const r = JSON.parse(localStorage.getItem(ROLE_KEY)); if (r && r.role === 'student' && r.studentId) mode = {role:'student', studentId:r.studentId}; } catch(e){}
+}
 const student = id => state.students.find(s => s.id === id);
 const touch = id => { const s = student(id); if (s) s.touched = Date.now(); };
 const snapshot = () => JSON.stringify(state);
@@ -534,7 +551,7 @@ function nextLessonOf(sid){
 }
 function upcoming(){
   const now = new Date();
-  return state.lessons.filter(l => l.status==='planned' && lessonEnd(l) > now).sort((a,b) => lessonStart(a)-lessonStart(b))[0];
+  return state.lessons.filter(l => l.status==='planned' && lessonEnd(l) > now && (!isStudent() || l.studentId===(me()||{}).id)).sort((a,b) => lessonStart(a)-lessonStart(b))[0];
 }
 function relTime(l){
   const now = new Date(), s = lessonStart(l);
@@ -772,6 +789,7 @@ function lessonSheet(id, mode=''){
       <dt>Тривалість</dt><dd>${l.duration} хв</dd>
       ${l.topic ? `<dt>Тема</dt><dd>${esc(l.topic)}</dd>` : ''}
       <dt>Статус</dt><dd><span class="pill st-${l.status}">${STATUS[l.status]}</span></dd>
+      ${l.request && l.status==='planned' ? `<dt>Запит учня</dt><dd>Перенести${l.request.date ? ' на ' + esc(fmtShort(l.request.date)) + (l.request.time ? ' о ' + esc(l.request.time) : '') : ''}${l.request.text ? ` — «${esc(l.request.text)}»` : ''}</dd>` : ''}
       ${l.note && mode!=='done' ? `<dt>Нотатка</dt><dd class="prose">${esc(l.note)}</dd>` : ''}
     </dl>${actions}`;
   const foot = `<button class="btn btn-danger" data-del>${ic('trash')} Видалити</button><span class="spacer"></span><button class="btn btn-ghost" data-edit>${ic('edit')} Редагувати</button>`;
@@ -793,7 +811,7 @@ function lessonSheet(id, mode=''){
     const c = findConflict({...l, date, time}, l.id);
     if (c) return fail('time', `Цей час зайнятий: ${c.time} · ${(student(c.studentId)||{}).name||''}`);
     const prev = {date:l.date, time:l.time, status:l.status};
-    Object.assign(l, {date, time, status:'planned'}); save(); closeSheet(); render();
+    Object.assign(l, {date, time, status:'planned'}); delete l.request; save(); closeSheet(); render();
     toast(`Перенесено на ${relDay(date).toLowerCase()} о ${time}`, {undo: () => { Object.assign(l, prev); save(); render(); }});
   };
 }
@@ -973,10 +991,11 @@ function settingsSheet(){
     values: state.settings,
     fields:[
       {name:'name', label:'Як до вас звертатися', placeholder:'Напр. Ганно', hint:'Використовується у привітанні на головній'},
+      {name:'bot', label:'Ім’я бота в Telegram', optional:true, placeholder:'Напр. MyTeacherBot', hint:'Потрібне для посилань-запрошень учнів у Telegram'},
       {name:'theme', label:'Тема', type:'seg', options:[['system','Як у системі'],['light','Світла'],['dark','Темна']]}
     ],
     intro:'',
-    onSubmit: v => { state.settings.name = v.name; state.settings.theme = v.theme || 'system'; applyTheme(); save(); toast('Налаштування збережено'); render(); }
+    onSubmit: v => { state.settings.name = v.name; state.settings.bot = v.bot.replace(/^@/, ''); state.settings.theme = v.theme || 'system'; applyTheme(); save(); toast('Налаштування збережено'); render(); }
   });
   const foot = sheetEl.querySelector('.sheet-foot');
   const reset = document.createElement('button');
@@ -1006,6 +1025,12 @@ function applyTheme(){
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 
 /* ========== Навігація ========== */
+const STUDENT_NAV = [
+  ['home','Головна','Головна','home'],
+  ['schedule','Мої уроки','Уроки','calendar'],
+  ['homework','Домашні','Домашні','tasks'],
+  ['materials','Матеріали','Матеріали','book']
+];
 const NAV = [
   ['home','Головна','Головна','home'],
   ['students','Учні','Учні','users'],
@@ -1013,15 +1038,20 @@ const NAV = [
   ['library','Уроки й матеріали','Уроки','book'],
   ['tasks','Завдання','Завдання','tasks']
 ];
-function route(){ const h = location.hash.replace(/^#\/?/, ''); const [r, id] = h.split('/'); return {r: NAV.some(n => n[0]===r) ? r : 'home', id}; }
+function route(){ const h = location.hash.replace(/^#\/?/, ''); const [r, id] = h.split('/'); return {r: nav().some(n => n[0]===r) ? r : 'home', id: isStudent() ? undefined : id}; }
+const nav = () => isStudent() ? STUDENT_NAV : NAV;
 function renderNav(){
   const {r} = route(), open = openTasks().length, todayCount = lessonsOn(todayISO()).filter(l => l.status!=='cancelled').length;
-  const counts = {tasks: open || '', schedule: todayCount || ''};
-  $('#side-nav').innerHTML = NAV.map(([k,l,,i]) => `<a class="nav-link" href="#${k}"${r===k?' aria-current="page"':''}>${ic(i)}<span>${l}</span>${counts[k] ? `<span class="count" aria-label="${k==='tasks'?'відкритих завдань':'уроків сьогодні'}: ${counts[k]}">${counts[k]}</span>` : ''}</a>`).join('');
-  $('#bottom-nav').innerHTML = NAV.map(([k,,s,i]) => `<a href="#${k}"${r===k?' aria-current="page"':''}>${ic(i)}<span>${s}</span></a>`).join('');
-  $('#side-name').textContent = state.students.length + ' ' + plural(state.students.length, ['учень','учні','учнів']);
+  const s0 = isStudent() ? me() : null;
+  const counts = isStudent() ? {homework: s0 ? s0.homework.filter(h => !h.done).length || '' : ''} : {tasks: open || '', schedule: todayCount || ''};
+  $('#side-title').textContent = isStudent() ? 'Мої заняття' : 'Кабінет викладача';
+  $('#top-title').textContent = isStudent() ? 'Заняття' : 'Кабінет';
+  $('#bottom-nav').style.setProperty('--n', nav().length);
+  $('#side-nav').innerHTML = nav().map(([k,l,,i]) => `<a class="nav-link" href="#${k}"${r===k?' aria-current="page"':''}>${ic(i)}<span>${l}</span>${counts[k] ? `<span class="count" aria-label="${k==='schedule'?'уроків сьогодні':'відкритих завдань'}: ${counts[k]}">${counts[k]}</span>` : ''}</a>`).join('');
+  $('#bottom-nav').innerHTML = nav().map(([k,,s,i]) => `<a href="#${k}"${r===k?' aria-current="page"':''}>${ic(i)}<span>${s}</span></a>`).join('');
+  $('#side-name').textContent = isStudent() ? (s0 ? s0.name : '') : state.students.length + ' ' + plural(state.students.length, ['учень','учні','учнів']);
   const n = upcoming();
-  const pill = n ? (() => { const s = student(n.studentId); const live = lessonStart(n) <= new Date(); return `<button class="next-pill${live?' live':''}" data-act="lesson" data-id="${n.id}" aria-label="Найближчий урок: ${esc(s ? s.name : '')}, ${relTime(n)}"><span class="dot"></span><span><b>${n.time}</b> · ${esc(s ? s.name.split(' ')[0] : '')} · ${relTime(n)}</span></button>`; })() : `<div class="next-pill" style="color:var(--muted)"><span>Найближчих уроків немає</span></div>`;
+  const pill = n ? (() => { const s = student(n.studentId); const live = lessonStart(n) <= new Date(); const who = isStudent() ? 'урок' : (s ? s.name.split(' ')[0] : ''); return `<button class="next-pill${live?' live':''}" data-act="${isStudent() ? 'my-lesson' : 'lesson'}" data-id="${n.id}" aria-label="Найближчий урок: ${esc(who)}, ${relTime(n)}"><span class="dot"></span><span><b>${n.time}</b> · ${esc(who)} · ${relTime(n)}</span></button>`; })() : `<div class="next-pill" style="color:var(--muted)"><span>Найближчих уроків немає</span></div>`;
   $('#side-next').innerHTML = pill; $('#top-next').innerHTML = pill;
 }
 
@@ -1032,7 +1062,7 @@ function lessonRow(l, {showDate=false, quick=true}={}){
   return `<li style="display:flex;align-items:center"><button class="row" data-act="lesson" data-id="${l.id}" style="flex:1">
       <span class="time-col">${l.time}<small>${showDate ? relDay(l.date) : hm(lessonEnd(l))}</small></span>
       <span class="row-main"><span class="row-title">${esc(s.name)}</span><span class="row-meta">${esc([s.lang, s.level, l.duration + ' хв', l.topic].filter(Boolean).join(' · '))}</span></span>
-      <span class="pill st-${l.status}">${STATUS[l.status]}</span></button>
+      ${l.request && l.status==='planned' ? '<span class="tag hide-sm">Запит на перенесення</span>' : ''}<span class="pill st-${l.status}">${STATUS[l.status]}</span></button>
       ${canQuick ? `<button class="quick-done" style="margin-right:14px" data-act="lesson-done" data-id="${l.id}" aria-label="Позначити проведеним" title="Позначити проведеним">${ic('check')}</button>` : ''}</li>`;
 }
 function taskRow(t){
@@ -1134,7 +1164,7 @@ function viewProfile(id){
   }
   return `<div class="page"><a class="back" href="#students">${ic('left')} Учні</a>
     <div class="profile-head">${avatar(s, true)}<div class="grow"><h1>${esc(s.name)}</h1><p class="lede" style="margin-top:4px">${esc(s.lang)} · ${esc(s.level)} · ${esc(s.format)}</p></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost" data-act="edit-student" data-id="${id}">${ic('edit')} Редагувати</button><button class="btn btn-primary" data-act="add-lesson" data-student="${id}">${ic('plus')} Урок</button></div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost" data-act="invite" data-id="${id}">${ic('link')} Запросити</button><button class="btn btn-ghost" data-act="edit-student" data-id="${id}">${ic('edit')} Редагувати</button><button class="btn btn-primary" data-act="add-lesson" data-student="${id}">${ic('plus')} Урок</button></div></div>
     <div class="tabs" role="tablist">${tabs.map(([k,l]) => `<button class="tab" role="tab" aria-selected="${tab===k}" data-act="ptab" data-k="${k}">${l}</button>`).join('')}</div>
     <div role="tabpanel">${content}</div></div>`;
 }
@@ -1226,6 +1256,144 @@ function viewTasks(){
   </div>`;
 }
 
+/* ========== Учнівська частина ==========
+   Роль визначає посилання: запрошення ?startapp=s_<id> (Telegram) або ?s=<id> (браузер) відкриває
+   кабінет учня й запам'ятовується на пристрої. Без запрошення відкривається кабінет викладача.
+   Поки немає спільної бази, учень на іншому пристрої бачить демо-дані. */
+function me(){ return student(mode.studentId) || student('s1') || state.students[0] || null; }
+const isDemoMe = () => isStudent() && !mode.preview && !student(mode.studentId);
+function inviteLinks(sid){
+  const bot = (state.settings.bot || '').trim().replace(/^@/, '').replace(/^https?:\/\/t\.me\//, '');
+  const web = /^https?:/.test(location.protocol) ? location.origin + location.pathname + '?s=' + sid : '';
+  return {tg: bot ? `https://t.me/${bot}?startapp=s_${sid}` : '', web};
+}
+async function copyText(text, input){
+  try { await navigator.clipboard.writeText(text); toast('Посилання скопійовано'); }
+  catch(e){ input.focus(); input.select(); toast('Посилання виділено — скопіюйте його вручну'); }
+}
+function inviteSheet(sid){
+  const s = student(sid), {tg: tgLink, web} = inviteLinks(sid);
+  const box = (label, link, key) => `<div class="field"><label for="inv-${key}">${label}</label><div style="display:flex;gap:8px"><input class="input" id="inv-${key}" readonly value="${esc(link)}"><button class="btn btn-ghost" data-copy="${key}">Копіювати</button></div></div>`;
+  const share = tgLink || web;
+  const body = `<p class="result-note" style="font-size:14px">${esc(s.name)} відкриє посилання й одразу побачить свій розклад, домашні завдання, матеріали та прогрес. Ваші нотатки, плани уроків та інших учнів не видно.</p>
+    <div class="form-grid">
+      ${tgLink ? box('Посилання для Telegram', tgLink, 'tg') : `<div class="field"><span class="lbl">Посилання для Telegram</span><div class="hint" style="font-size:13px">Вкажіть ім’я бота в налаштуваннях — і тут з’явиться посилання, яке відкриває мініапку в Telegram.</div><div><button class="btn btn-ghost btn-sm" data-open-settings>Відкрити налаштування</button></div></div>`}
+      ${web ? box('Посилання для браузера', web, 'web') : `<div class="field"><span class="lbl">Посилання для браузера</span><div class="hint" style="font-size:13px">З’явиться, коли апку буде викладено на сайт (напр. GitHub Pages).</div></div>`}
+    </div>`;
+  const foot = `<button class="btn btn-quiet" data-preview>${ic('users')} Як бачить учень</button><span class="spacer"></span>${share ? `<a class="btn btn-primary" target="_blank" rel="noopener" href="https://t.me/share/url?url=${encodeURIComponent(share)}&text=${encodeURIComponent('Ваш кабінет для занять: розклад, домашні та матеріали')}">Надіслати в Telegram</a>` : ''}`;
+  const el = openSheet('Запросити учня', body, {foot});
+  el.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => { const i = el.querySelector('#inv-' + b.dataset.copy); copyText(i.value, i); });
+  const os = el.querySelector('[data-open-settings]'); if (os) os.onclick = () => settingsSheet();
+  el.querySelector('[data-preview]').onclick = () => { closeSheet(true); viewAs(sid); };
+}
+function viewAs(sid){ mode = {role:'student', studentId:sid, preview:true}; lastRoute = ''; location.hash = '#home'; render(); }
+function exitStudent(){
+  const back = mode.preview ? '#students/' + mode.studentId : '#home';
+  if (!mode.preview){ try { localStorage.removeItem(ROLE_KEY); } catch(e){} }
+  mode = {role:'teacher'}; lastRoute = ''; location.hash = back; render();
+}
+function studentBanner(){
+  const s = me();
+  if (mode.preview) return `<div class="banner"><span>Перегляд як учень: <b>${esc(s ? s.name : '')}</b>. Так цей кабінет побачить учень за запрошенням.</span><button class="btn btn-ghost btn-sm" data-act="exit-student">Повернутися до кабінету викладача</button></div>`;
+  if (isDemoMe()) return `<div class="banner"><span>Демо-режим: синхронізацію з викладачем ще не підключено, тому показано приклад даних.</span></div>`;
+  return '';
+}
+const noStudent = () => `<div class="page">${studentBanner()}<div class="panel">${empty('Профіль не знайдено','Попросіть викладача надіслати нове посилання-запрошення.')}</div></div>`;
+function myHwRow(h){
+  return `<li class="task-row"><button class="check${h.done?' on':''}" data-act="my-hw" data-id="${h.id}" role="checkbox" aria-checked="${h.done}" aria-label="${h.done?'Позначити невиконаним':'Позначити виконаним'}: ${esc(h.text)}">${ic('check')}</button><span class="row-main"><span class="row-title ${h.done?'done-text':''}" style="white-space:normal">${esc(h.text)}</span></span></li>`;
+}
+function myLessonRow(l){
+  const req = l.request && l.status==='planned';
+  return `<li><button class="row" data-act="my-lesson" data-id="${l.id}"><span class="time-col">${l.time}<small>${relDay(l.date)}</small></span>
+    <span class="row-main"><span class="row-title">${esc(l.topic || 'Урок')}</span><span class="row-meta">${esc(cap(fmtLong(l.date)))} · ${l.duration} хв</span></span>
+    ${req ? '<span class="tag hide-sm">Запит на перенесення</span>' : ''}<span class="pill st-${l.status}">${STATUS[l.status]}</span></button></li>`;
+}
+function viewStudentHome(){
+  const s = me(); if (!s) return noStudent();
+  const h = new Date().getHours(), hello = h < 5 ? 'Доброї ночі' : h < 12 ? 'Добрий ранок' : h < 18 ? 'Добрий день' : 'Добрий вечір';
+  const n = nextLessonOf(s.id), hw = s.homework.filter(x => !x.done);
+  const next = LEVELS[Math.min(LEVELS.indexOf(s.level)+1, LEVELS.length-1)];
+  const focus = n ? `<div class="panel focus"><div class="focus-time">${n.time}</div><div class="focus-body"><div class="focus-label">Наступний урок · ${relTime(n)}</div><div class="focus-name">${esc(n.topic || 'Урок')}</div><div class="row-meta">${esc(cap(fmtLong(n.date)))} · ${n.duration} хв</div></div>
+      <div>${n.request ? '<span class="tag">Запит на перенесення надіслано</span>' : `<button class="btn btn-ghost" data-act="resched" data-id="${n.id}">Попросити перенести</button>`}</div></div>`
+    : `<div class="panel">${empty('Наступного уроку поки немає','Викладач додасть його в розклад — він з’явиться тут.')}</div>`;
+  return `<div class="page">${studentBanner()}
+    <div class="page-head"><div><p class="eyebrow">${esc(cap(fmtLong(todayISO())))}</p><h1>${hello}!</h1><p class="lede">${esc(s.name)} · ${esc(s.lang)} ${esc(s.level)}</p></div></div>
+    ${focus}
+    <div class="grid-2">
+      <section class="section"><div class="section-head"><h2>Домашні завдання · ${hw.length}</h2><a class="link" href="#homework">Усі</a></div>
+        ${hw.length ? `<ul class="rows panel">${hw.map(myHwRow).join('')}</ul>` : `<div class="panel">${empty('Усе виконано','Нових домашніх завдань немає.')}</div>`}</section>
+      <section class="section"><div class="section-head"><h2>Мій прогрес</h2></div>
+        <div class="panel" style="padding:18px"><div style="display:flex;justify-content:space-between;margin-bottom:10px"><span>${esc(s.level)} → ${esc(next)}</span><b style="font-variant-numeric:tabular-nums">${s.progress}%</b></div><div class="bar lg" role="progressbar" aria-valuenow="${s.progress}" aria-valuemin="0" aria-valuemax="100" aria-label="Прогрес рівня"><i style="width:${s.progress}%"></i></div>
+        ${s.goals ? `<p class="row-meta" style="margin:14px 0 4px">Мета</p><p class="prose">${esc(s.goals)}</p>` : ''}</div></section>
+    </div></div>`;
+}
+function viewStudentSchedule(){
+  const s = me(); if (!s) return noStudent();
+  const now = new Date(), mine = state.lessons.filter(l => l.studentId===s.id);
+  const up = mine.filter(l => l.status==='planned' && lessonEnd(l) > now).sort((a,b) => lessonStart(a)-lessonStart(b));
+  const past = mine.filter(l => !(l.status==='planned' && lessonEnd(l) > now)).sort((a,b) => lessonStart(b)-lessonStart(a)).slice(0, 8);
+  return `<div class="page">${studentBanner()}
+    <div class="page-head"><div><h1>Мої уроки</h1><p class="lede">Натисніть на урок, щоб попросити перенести його.</p></div></div>
+    <section><div class="section-head"><h2>Найближчі · ${up.length}</h2></div>${up.length ? `<ul class="rows panel">${up.map(myLessonRow).join('')}</ul>` : `<div class="panel">${empty('Запланованих уроків немає','Викладач додасть їх у розклад.')}</div>`}</section>
+    ${past.length ? `<section class="section"><div class="section-head"><h2>Минулі</h2></div><ul class="rows panel">${past.map(myLessonRow).join('')}</ul></section>` : ''}</div>`;
+}
+function viewStudentHomework(){
+  const s = me(); if (!s) return noStudent();
+  const open = s.homework.filter(h => !h.done), done = s.homework.filter(h => h.done);
+  return `<div class="page">${studentBanner()}
+    <div class="page-head"><div><h1>Домашні завдання</h1><p class="lede">${open.length ? `${open.length} ${plural(open.length,['завдання','завдання','завдань'])} до виконання. Позначайте виконане — викладач це побачить.` : 'Усе виконано. Чудова робота!'}</p></div></div>
+    ${open.length ? `<ul class="rows panel">${open.map(myHwRow).join('')}</ul>` : `<div class="panel">${empty('Нових завдань немає','Коли викладач додасть завдання, воно з’явиться тут.')}</div>`}
+    ${done.length ? `<div class="group-title"><h2>Виконані</h2><span class="n">${done.length}</span></div><ul class="rows panel">${done.map(myHwRow).join('')}</ul>` : ''}</div>`;
+}
+function viewStudentMaterials(){
+  const s = me(); if (!s) return noStudent();
+  const mats = s.materialIds.map(id => state.materials.find(m => m.id===id)).filter(Boolean);
+  return `<div class="page">${studentBanner()}
+    <div class="page-head"><div><h1>Матеріали</h1><p class="lede">Посилання й файли від викладача.</p></div></div>
+    ${mats.length ? `<ul class="rows panel">${mats.map(m => `<li><button class="row" data-act="mat-open" data-id="${m.id}"><span class="avatar" style="border-radius:9px;color:var(--muted)">${ic(m.url ? 'link' : 'file')}</span><span class="row-main"><span class="row-title">${esc(m.title)}</span><span class="row-meta">${esc([m.skill, m.level, m.topic].filter(Boolean).join(' · '))}</span></span><span class="row-side">${ic(m.url ? 'ext' : 'download')}</span></button></li>`).join('')}</ul>`
+      : `<div class="panel">${empty('Матеріалів поки немає','Викладач додасть їх до вашого профілю.')}</div>`}</div>`;
+}
+function myLessonSheet(id){
+  const l = state.lessons.find(x => x.id===id); if (!l) return;
+  const canReq = l.status==='planned' && lessonStart(l) > new Date();
+  const body = `<dl class="detail-list">
+      <dt>Коли</dt><dd>${esc(cap(fmtLong(l.date)))}, ${l.time}–${hm(lessonEnd(l))}</dd>
+      <dt>Тривалість</dt><dd>${l.duration} хв</dd>
+      ${l.topic ? `<dt>Тема</dt><dd>${esc(l.topic)}</dd>` : ''}
+      <dt>Статус</dt><dd><span class="pill st-${l.status}">${STATUS[l.status]}</span></dd>
+      ${l.request ? `<dt>Ваш запит</dt><dd>Перенести${l.request.date ? ' на ' + esc(fmtShort(l.request.date)) + (l.request.time ? ' о ' + esc(l.request.time) : '') : ''}${l.request.text ? ` — «${esc(l.request.text)}»` : ''}</dd>` : ''}
+    </dl>`;
+  const foot = canReq && !l.request ? `<span class="spacer"></span><button class="btn btn-primary" data-req>${ic('clock')} Попросити перенести</button>` : '';
+  const el = openSheet('Урок', body, {foot});
+  const b = el.querySelector('[data-req]'); if (b) b.onclick = () => reschedForm(id);
+}
+function reschedForm(id){
+  const l = state.lessons.find(x => x.id===id), s = student(l.studentId);
+  openForm({
+    title:'Попросити перенести урок', submit:'Надіслати запит',
+    intro:`<p class="result-note" style="font-size:14px">Урок ${esc(fmtLong(l.date))} о ${l.time}. Викладач отримає запит і запропонує новий час.</p>`,
+    fields:[
+      {name:'date', label:'Зручна дата', type:'date', optional:true, half:true},
+      {name:'time', label:'Зручний час', type:'time', optional:true, half:true},
+      {name:'text', label:'Коментар', type:'textarea', rows:2, optional:true, placeholder:'Напр. Захворів, можна в четвер?'}
+    ],
+    onSubmit: v => {
+      if (v.date && dayDiff(v.date) < 0) return {date:'Оберіть дату, яка ще не минула'};
+      l.request = {date:v.date, time:v.time, text:v.text, at:Date.now()};
+      const pref = v.date ? ' → бажано ' + fmtShort(v.date) + (v.time ? ' о ' + v.time : '') : '';
+      state.tasks.push({id:uid(), text:`Запит на перенесення: ${s ? s.name : 'учень'}, урок ${fmtShort(l.date)} о ${l.time}${pref}${v.text ? ' — «' + v.text + '»' : ''}`, due:todayISO(), studentId:l.studentId, done:false, created:Date.now()});
+      if (s) s.touched = Date.now();
+      save(); render(); haptic(); toast('Запит надіслано викладачу');
+    }
+  });
+}
+function studentSettings(){
+  const el = openSheet('Налаштування', `<div class="form-grid">${fieldHTML({name:'theme', label:'Тема', type:'seg', options:[['system','Як у системі'],['light','Світла'],['dark','Темна']]}, state.settings.theme)}</div>
+    ${mode.preview ? '' : `<div class="form-section" style="margin-top:22px">Прототип</div><p class="result-note" style="margin-top:8px">У робочій версії учень не зможе перемкнутися на кабінет викладача.</p><button class="btn btn-ghost" data-exit>Вийти з кабінету учня</button>`}`);
+  el.querySelectorAll('input[name=theme]').forEach(r => r.onchange = () => { state.settings.theme = r.value; applyTheme(); save(); });
+  const x = el.querySelector('[data-exit]'); if (x) x.onclick = () => { closeSheet(true); exitStudent(); };
+}
+
 /* ========== Рендер ========== */
 let lastRoute = '';
 function render(){
@@ -1234,12 +1402,13 @@ function render(){
   const sy = key === lastRoute ? window.scrollY : 0;
   const ae = document.activeElement, aeId = ae && ae.id;
   if (key !== lastRoute) ui.profileTab = 'overview';
-  main.innerHTML = r==='students' && id ? viewProfile(id) : ({home:viewHome, students:viewStudents, schedule:viewSchedule, library:viewLibrary, tasks:viewTasks})[r]();
+  const views = isStudent() ? {home:viewStudentHome, schedule:viewStudentSchedule, homework:viewStudentHomework, materials:viewStudentMaterials} : {home:viewHome, students:viewStudents, schedule:viewSchedule, library:viewLibrary, tasks:viewTasks};
+  main.innerHTML = r==='students' && id ? viewProfile(id) : views[r]();
   if (key !== lastRoute) window.scrollTo(0, 0);
   else { window.scrollTo(0, sy); if (aeId && $('#'+aeId)) $('#'+aeId).focus(); }
   lastRoute = key;
-  const title = NAV.find(n => n[0]===r)[1];
-  document.title = (id && student(id) ? student(id).name : title) + ' · Кабінет викладача';
+  const title = nav().find(n => n[0]===r)[1];
+  document.title = (id && student(id) ? student(id).name : title) + (isStudent() ? ' · Мої заняття' : ' · Кабінет викладача');
   renderNav(); syncBack();
 }
 window.addEventListener('hashchange', () => { closeSheet(true); render(); });
@@ -1256,7 +1425,12 @@ const ACT = {
   'task-toggle': el => toggleTask(el.dataset.id),
   'task-edit': el => taskForm(el.dataset.id),
   'toggle-done': () => { ui.tasks.showDone = !ui.tasks.showDone; render(); },
-  settings: () => settingsSheet(),
+  settings: () => isStudent() ? studentSettings() : settingsSheet(),
+  invite: el => inviteSheet(el.dataset.id),
+  'exit-student': () => exitStudent(),
+  'my-lesson': el => myLessonSheet(el.dataset.id),
+  resched: el => reschedForm(el.dataset.id),
+  'my-hw': el => { const s = me(), h = s.homework.find(x => x.id===el.dataset.id); h.done = !h.done; s.touched = Date.now(); save(); render(); if (h.done){ haptic(); toast('Позначено як виконане'); } },
   theme: () => { state.settings.theme = effectiveDark() ? 'light' : 'dark'; applyTheme(); save(); },
   'st-reset': () => { ui.st = {q:'', lang:'', level:'', format:''}; render(); },
   ptab: el => { ui.profileTab = el.dataset.k; render(); },
@@ -1334,6 +1508,7 @@ try {
   }
 } catch(e){}
 
+initRole();
 document.querySelectorAll('[data-act=settings]').forEach(b => b.innerHTML = ic('settings'));
 applyTheme();
 render();
