@@ -196,6 +196,8 @@
   .seg input{position:absolute;opacity:0;pointer-events:none}
   .seg label:has(input:focus-visible) span{outline:2px solid var(--accent)}
   .banner{display:flex;align-items:center;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;padding:12px 16px;margin-bottom:24px;border-radius:var(--r);background:var(--accent-soft);font-size:14px}
+  body.gate .side,body.gate .topbar,body.gate .bottom-nav{display:none!important}
+  .sync-note{font-size:12px;color:var(--muted);padding:0 10px;min-height:18px}
   .result-note{color:var(--muted);font-size:13px;margin:0 0 10px}
 
   /* Порожні стани */
@@ -335,6 +337,7 @@
     <nav id="side-nav"></nav>
     <div class="side-foot">
       <div id="side-next"></div>
+      <div class="sync-note" id="sync-note" aria-live="polite"></div>
       <div class="side-tools">
         <button class="icon-btn" data-act="theme" id="theme-btn-side" aria-label="Змінити тему" title="Змінити тему"></button>
         <button class="icon-btn" data-act="settings" aria-label="Налаштування" title="Налаштування"></button>
@@ -513,6 +516,11 @@ let state;
 try { state = JSON.parse(localStorage.getItem(LS_KEY)); } catch(e) { state = null; }
 if (!state || state.v !== 1) state = seed();
 function save(){
+  if (cloud.on){
+    if (isStudent()){ try { localStorage.setItem('tw-theme', state.settings.theme); } catch(e){} }
+    else queueCloudSave();
+    return true;
+  }
   try { localStorage.setItem(LS_KEY, JSON.stringify(state)); return true; }
   catch(e){ toast('Не вдалося зберегти: сховище браузера заповнене або недоступне', {error:true}); return false; }
 }
@@ -994,16 +1002,22 @@ function settingsSheet(){
       {name:'bot', label:'Ім’я бота в Telegram', optional:true, placeholder:'Напр. MyTeacherBot', hint:'Потрібне для посилань-запрошень учнів у Telegram'},
       {name:'theme', label:'Тема', type:'seg', options:[['system','Як у системі'],['light','Світла'],['dark','Темна']]}
     ],
-    intro:'',
+    intro: cloud.on && cloud.me ? `<p class="result-note" style="font-size:14px">Ваш Telegram ID: <b>${esc(cloud.me.id)}</b>. Додайте його в секрет TEACHER_IDS у Supabase, щоб кабінет викладача відкривався лише вам.</p>` : '',
     onSubmit: v => { state.settings.name = v.name; state.settings.bot = v.bot.replace(/^@/, ''); state.settings.theme = v.theme || 'system'; applyTheme(); save(); toast('Налаштування збережено'); render(); }
   });
   const foot = sheetEl.querySelector('.sheet-foot');
   const reset = document.createElement('button');
-  reset.className = 'btn btn-danger'; reset.type = 'button'; reset.textContent = 'Скинути до демо-даних';
-  reset.onclick = () => confirmSheet('Скинути дані?', 'Усі ваші зміни буде замінено демонстраційними даними.', 'Скинути', () => {
+  reset.className = 'btn btn-danger'; reset.type = 'button'; reset.textContent = cloud.on ? 'Дані…' : 'Скинути до демо-даних';
+  reset.onclick = () => cloud.on ? dataSheet() : confirmSheet('Скинути дані?', 'Усі ваші зміни буде замінено демонстраційними даними.', 'Скинути', () => {
     const snap = snapshot(); state = seed(); save(); applyTheme(); render(); toast('Демо-дані відновлено', {undo: () => restore(snap)});
   });
   foot.prepend(reset);
+}
+function dataSheet(){
+  const el = openSheet('Дані кабінету', `<p class="result-note" style="font-size:14px">Дані зберігаються в базі й доступні з будь-якого вашого пристрою в Telegram.</p><div class="action-grid"><button class="btn btn-ghost" data-demo>Завантажити демо-дані</button><button class="btn btn-danger" data-clear>Очистити все</button></div>`);
+  const swap = (title, text, make) => confirmSheet(title, text, 'Так, замінити', () => { const snap = snapshot(); state = make(); save(); applyTheme(); render(); toast('Готово', {undo: () => restore(snap)}); });
+  el.querySelector('[data-demo]').onclick = () => swap('Завантажити демо-дані?', 'Ваших учнів, розклад і матеріали буде замінено прикладом. Запрошення учнів перестануть працювати.', () => Object.assign(seed(), {settings:{...state.settings}}));
+  el.querySelector('[data-clear]').onclick = () => swap('Очистити кабінет?', 'Буде видалено всіх учнів, уроки, матеріали й завдання. Шаблони уроків залишаться.', () => Object.assign(emptyWorkspace(), {settings:{...state.settings}}));
 }
 
 /* ========== Тема ========== */
@@ -1163,7 +1177,7 @@ function viewProfile(id){
       <ul class="rows" style="border-top:1px solid var(--line)">${s.notes.map(x => `<li class="note-item" style="display:flex;gap:10px"><div style="flex:1;min-width:0"><time>${esc(fmtShort(x.date))}</time><p class="prose">${esc(x.text)}</p></div><button class="icon-btn" data-act="note-del" data-id="${x.id}" aria-label="Видалити нотатку">${ic('trash')}</button></li>`).join('') || `<li>${empty('Нотаток ще немає','Записуйте спостереження після занять.').replace('class="empty"','class="empty sm"')}</li>`}</ul></div>`;
   }
   return `<div class="page"><a class="back" href="#students">${ic('left')} Учні</a>
-    <div class="profile-head">${avatar(s, true)}<div class="grow"><h1>${esc(s.name)}</h1><p class="lede" style="margin-top:4px">${esc(s.lang)} · ${esc(s.level)} · ${esc(s.format)}</p></div>
+    <div class="profile-head">${avatar(s, true)}<div class="grow"><h1>${esc(s.name)}</h1><p class="lede" style="margin-top:4px">${esc(s.lang)} · ${esc(s.level)} · ${esc(s.format)}${s.tg ? ' · підключено в Telegram' : ''}</p></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost" data-act="invite" data-id="${id}">${ic('link')} Запросити</button><button class="btn btn-ghost" data-act="edit-student" data-id="${id}">${ic('edit')} Редагувати</button><button class="btn btn-primary" data-act="add-lesson" data-student="${id}">${ic('plus')} Урок</button></div></div>
     <div class="tabs" role="tablist">${tabs.map(([k,l]) => `<button class="tab" role="tab" aria-selected="${tab===k}" data-act="ptab" data-k="${k}">${l}</button>`).join('')}</div>
     <div role="tabpanel">${content}</div></div>`;
@@ -1262,9 +1276,15 @@ function viewTasks(){
    Поки немає спільної бази, учень на іншому пристрої бачить демо-дані. */
 function me(){ return student(mode.studentId) || student('s1') || state.students[0] || null; }
 const isDemoMe = () => isStudent() && !mode.preview && !student(mode.studentId);
+function newInviteCode(){ const a = new Uint8Array(9); crypto.getRandomValues(a); return [...a].map(x => 'abcdefghijkmnpqrstuvwxyz23456789'[x % 32]).join(''); }
 function inviteLinks(sid){
-  const bot = (state.settings.bot || '').trim().replace(/^@/, '').replace(/^https?:\/\/t\.me\//, '');
+  const bot = (state.settings.bot || (cloud.on ? CLOUD.bot : '')).trim().replace(/^@/, '').replace(/^https?:\/\/t\.me\//, '');
   const web = /^https?:/.test(location.protocol) ? location.origin + location.pathname + '?s=' + sid : '';
+  if (cloud.on){
+    const s = student(sid);
+    if (!s.invite){ s.invite = newInviteCode(); save(); }
+    return {tg: `https://t.me/${bot}?startapp=s_${s.invite}`, web:''};
+  }
   return {tg: bot ? `https://t.me/${bot}?startapp=s_${sid}` : '', web};
 }
 async function copyText(text, input){
@@ -1278,12 +1298,14 @@ function inviteSheet(sid){
   const body = `<p class="result-note" style="font-size:14px">${esc(s.name)} відкриє посилання й одразу побачить свій розклад, домашні завдання, матеріали та прогрес. Ваші нотатки, плани уроків та інших учнів не видно.</p>
     <div class="form-grid">
       ${tgLink ? box('Посилання для Telegram', tgLink, 'tg') : `<div class="field"><span class="lbl">Посилання для Telegram</span><div class="hint" style="font-size:13px">Вкажіть ім’я бота в налаштуваннях — і тут з’явиться посилання, яке відкриває мініапку в Telegram.</div><div><button class="btn btn-ghost btn-sm" data-open-settings>Відкрити налаштування</button></div></div>`}
-      ${web ? box('Посилання для браузера', web, 'web') : `<div class="field"><span class="lbl">Посилання для браузера</span><div class="hint" style="font-size:13px">З’явиться, коли апку буде викладено на сайт (напр. GitHub Pages).</div></div>`}
+      ${cloud.on ? '' : web ? box('Посилання для браузера', web, 'web') : `<div class="field"><span class="lbl">Посилання для браузера</span><div class="hint" style="font-size:13px">З’явиться, коли апку буде викладено на сайт (напр. GitHub Pages).</div></div>`}
+      ${cloud.on ? `<div class="field"><span class="lbl">Статус</span><div style="font-size:14px">${s.tg ? `Підключено в Telegram: ${esc(s.tg.name)}${s.tg.username ? ' (@' + esc(s.tg.username) + ')' : ''}` : 'Учень ще не відкрив запрошення'}</div><div><button class="btn btn-quiet btn-sm" data-regen>Створити нове посилання</button></div><div class="hint">Старе посилання перестане працювати для нових відкриттів.</div></div>` : ''}
     </div>`;
   const foot = `<button class="btn btn-quiet" data-preview>${ic('users')} Як бачить учень</button><span class="spacer"></span>${share ? `<a class="btn btn-primary" target="_blank" rel="noopener" href="https://t.me/share/url?url=${encodeURIComponent(share)}&text=${encodeURIComponent('Ваш кабінет для занять: розклад, домашні та матеріали')}">Надіслати в Telegram</a>` : ''}`;
   const el = openSheet('Запросити учня', body, {foot});
   el.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => { const i = el.querySelector('#inv-' + b.dataset.copy); copyText(i.value, i); });
   const os = el.querySelector('[data-open-settings]'); if (os) os.onclick = () => settingsSheet();
+  const rg = el.querySelector('[data-regen]'); if (rg) rg.onclick = () => { s.invite = newInviteCode(); save(); inviteSheet(sid); toast('Створено нове посилання'); };
   el.querySelector('[data-preview]').onclick = () => { closeSheet(true); viewAs(sid); };
 }
 function viewAs(sid){ mode = {role:'student', studentId:sid, preview:true}; lastRoute = ''; location.hash = '#home'; render(); }
@@ -1377,11 +1399,16 @@ function reschedForm(id){
       {name:'time', label:'Зручний час', type:'time', optional:true, half:true},
       {name:'text', label:'Коментар', type:'textarea', rows:2, optional:true, placeholder:'Напр. Захворів, можна в четвер?'}
     ],
-    onSubmit: v => {
+    onSubmit: async v => {
       if (v.date && dayDiff(v.date) < 0) return {date:'Оберіть дату, яка ще не минула'};
+      if (cloud.on){
+        if (mode.preview) return 'Це перегляд: запит надсилає сам учень';
+        try { const r = await api('resched', {lessonId:l.id, date:v.date, time:v.time, text:v.text}); loadStudent(r); render(); haptic(); toast('Запит надіслано викладачу'); }
+        catch(e){ return 'Не вдалося надіслати запит — перевірте з’єднання'; }
+        return;
+      }
       l.request = {date:v.date, time:v.time, text:v.text, at:Date.now()};
-      const pref = v.date ? ' → бажано ' + fmtShort(v.date) + (v.time ? ' о ' + v.time : '') : '';
-      state.tasks.push({id:uid(), text:`Запит на перенесення: ${s ? s.name : 'учень'}, урок ${fmtShort(l.date)} о ${l.time}${pref}${v.text ? ' — «' + v.text + '»' : ''}`, due:todayISO(), studentId:l.studentId, done:false, created:Date.now()});
+      state.tasks.push({id:uid(), text:reqTaskText(s, l, v), due:todayISO(), studentId:l.studentId, done:false, created:Date.now()});
       if (s) s.touched = Date.now();
       save(); render(); haptic(); toast('Запит надіслано викладачу');
     }
@@ -1389,7 +1416,7 @@ function reschedForm(id){
 }
 function studentSettings(){
   const el = openSheet('Налаштування', `<div class="form-grid">${fieldHTML({name:'theme', label:'Тема', type:'seg', options:[['system','Як у системі'],['light','Світла'],['dark','Темна']]}, state.settings.theme)}</div>
-    ${mode.preview ? '' : `<div class="form-section" style="margin-top:22px">Прототип</div><p class="result-note" style="margin-top:8px">У робочій версії учень не зможе перемкнутися на кабінет викладача.</p><button class="btn btn-ghost" data-exit>Вийти з кабінету учня</button>`}`);
+    ${mode.preview || cloud.on ? '' : `<div class="form-section" style="margin-top:22px">Прототип</div><p class="result-note" style="margin-top:8px">У робочій версії учень не зможе перемкнутися на кабінет викладача.</p><button class="btn btn-ghost" data-exit>Вийти з кабінету учня</button>`}`);
   el.querySelectorAll('input[name=theme]').forEach(r => r.onchange = () => { state.settings.theme = r.value; applyTheme(); save(); });
   const x = el.querySelector('[data-exit]'); if (x) x.onclick = () => { closeSheet(true); exitStudent(); };
 }
@@ -1411,7 +1438,7 @@ function render(){
   document.title = (id && student(id) ? student(id).name : title) + (isStudent() ? ' · Мої заняття' : ' · Кабінет викладача');
   renderNav(); syncBack();
 }
-window.addEventListener('hashchange', () => { closeSheet(true); render(); });
+window.addEventListener('hashchange', () => { if (!booted) return; closeSheet(true); render(); });
 
 /* Делеговані дії */
 const ACT = {
@@ -1430,7 +1457,14 @@ const ACT = {
   'exit-student': () => exitStudent(),
   'my-lesson': el => myLessonSheet(el.dataset.id),
   resched: el => reschedForm(el.dataset.id),
-  'my-hw': el => { const s = me(), h = s.homework.find(x => x.id===el.dataset.id); h.done = !h.done; s.touched = Date.now(); save(); render(); if (h.done){ haptic(); toast('Позначено як виконане'); } },
+  'my-hw': async el => {
+    const s = me(), h = s.homework.find(x => x.id===el.dataset.id);
+    if (cloud.on && mode.preview){ toast('Це перегляд: відмітки ставить сам учень'); return; }
+    h.done = !h.done; render(); if (h.done){ haptic(); toast('Позначено як виконане'); }
+    if (!cloud.on){ s.touched = Date.now(); save(); return; }
+    try { const r = await api('hw', {id:h.id, done:h.done}); loadStudent(r); render(); }
+    catch(e){ h.done = !h.done; render(); toast('Не вдалося зберегти відмітку — перевірте з’єднання', {error:true}); }
+  },
   theme: () => { state.settings.theme = effectiveDark() ? 'light' : 'dark'; applyTheme(); save(); },
   'st-reset': () => { ui.st = {q:'', lang:'', level:'', format:''}; render(); },
   ptab: el => { ui.profileTab = el.dataset.k; render(); },
@@ -1508,11 +1542,145 @@ try {
   }
 } catch(e){}
 
-initRole();
-document.querySelectorAll('[data-act=settings]').forEach(b => b.innerHTML = ic('settings'));
-applyTheme();
-render();
-setInterval(() => { renderNav(); if (route().r === 'home' && !sheetEl && !document.activeElement.matches('input,textarea,select')) render(); }, 60000);
+/* ========== Хмара: Supabase + Telegram ==========
+   Усередині Telegram дані живуть у базі й синхронізуються між викладачем і учнями
+   через серверну функцію supabase/functions/api (вона перевіряє підпис Telegram).
+   Поза Telegram апка працює локально, як раніше. */
+const CLOUD = {
+  fn: 'https://ftwxwwmhjqqjbihbamar.supabase.co/functions/v1/api',
+  key: 'sb_publishable_jeEZpl6VpTMZRifPztp03w_RXsaWIdW',
+  bot: 'mmytteacherappbot'
+};
+const cloud = {on:false, me:null, version:0, dirty:false, saving:false, again:false, applied:[], seen:new Set(), timer:null, offline:false};
+let booted = false;
+async function api(op, extra={}){
+  const r = await fetch(CLOUD.fn, {method:'POST', headers:{'Content-Type':'application/json', apikey:CLOUD.key, Authorization:'Bearer ' + CLOUD.key}, body: JSON.stringify({op, initData: tg.initData, ...extra})});
+  let b = null; try { b = await r.json(); } catch(e){}
+  if (r.status === 409 && b) return b;
+  if (!r.ok){ const err = new Error((b && b.error) || 'HTTP ' + r.status); err.status = r.status; throw err; }
+  return b;
+}
+function setSync(text){ const el = $('#sync-note'); if (el) el.textContent = text; }
+function reqTaskText(s, l, p){
+  const pref = p.date ? ' → бажано ' + fmtShort(p.date) + (p.time ? ' о ' + p.time : '') : '';
+  return `Запит на перенесення: ${s ? s.name : 'учень'}, урок ${fmtShort(l.date)} о ${l.time}${pref}${p.text ? ' — «' + p.text + '»' : ''}`;
+}
+function emptyWorkspace(){
+  const first = cloud.me && cloud.me.name ? cloud.me.name.split(' ')[0] : '';
+  return {v:1, students:[], lessons:[], plans: seed().plans.filter(p => p.isTemplate), materials:[], tasks:[], settings:{name:first, theme:'system', bot:CLOUD.bot}};
+}
+// Переносить дії учнів (відмітки ДЗ, запити на перенесення, підключення) у дані викладача.
+function applyActions(list){
+  let n = 0;
+  for (const a of list || []){
+    if (cloud.seen.has(a.id)) continue;
+    cloud.seen.add(a.id); cloud.applied.push(a.id); n++;
+    const s = student(a.student_id); if (!s) continue;
+    if (a.kind === 'hw'){ const h = s.homework.find(x => x.id === a.payload.id); if (h) h.done = !!a.payload.done; }
+    if (a.kind === 'resched'){
+      const l = state.lessons.find(x => x.id === a.payload.lessonId), p = a.payload;
+      if (l && l.status === 'planned'){
+        l.request = {date:p.date, time:p.time, text:p.text, at:p.at};
+        state.tasks.push({id:uid(), text:reqTaskText(s, l, p), due:todayISO(), studentId:s.id, done:false, created:Date.now()});
+      }
+    }
+    if (a.kind === 'joined') s.tg = {name:a.payload.name || '', username:a.payload.username || '', at:a.created_at};
+    s.touched = Date.now();
+  }
+  return n;
+}
+function loadTeacher(r){
+  state = r.data && Array.isArray(r.data.students) ? r.data : emptyWorkspace();
+  state.settings = Object.assign({name:'', theme:'system', bot:CLOUD.bot}, state.settings);
+  if (!state.settings.bot) state.settings.bot = CLOUD.bot;
+  cloud.version = r.version || 0; cloud.applied = []; cloud.seen = new Set();
+  mode = {role:'teacher'};
+  const n = applyActions(r.actions);
+  if (n || !r.data) queueCloudSave();
+  return n;
+}
+function loadStudent(r){
+  let theme = 'system'; try { theme = localStorage.getItem('tw-theme') || 'system'; } catch(e){}
+  const v = r.view;
+  state = {v:1, students: v ? [{...v.student, notes:[], summary:'', touched:0}] : [], lessons: v ? v.lessons : [], materials: v ? v.materials : [], plans:[], tasks:[], settings:{name:'', theme, bot:CLOUD.bot}};
+  mode = {role:'student', studentId: v ? v.student.id : ''};
+}
+function queueCloudSave(){
+  cloud.dirty = true; setSync('Збереження…');
+  clearTimeout(cloud.timer); cloud.timer = setTimeout(flush, 500);
+}
+async function flush(){
+  clearTimeout(cloud.timer);
+  if (cloud.saving){ cloud.again = true; return; }
+  if (!cloud.dirty) return;
+  cloud.saving = true; cloud.dirty = false;
+  const applied = cloud.applied.slice();
+  try {
+    const r = await api('save', {data:state, version:cloud.version, applied});
+    if (r.conflict){ loadTeacher(r); if (!sheetEl) render(); toast('Дані змінилися на іншому пристрої — показано свіжу версію'); }
+    else { cloud.version = r.version; cloud.applied = cloud.applied.filter(id => !applied.includes(id)); }
+    if (cloud.offline){ cloud.offline = false; toast('З’єднання відновлено, усе збережено'); }
+    setSync('Усе збережено');
+  } catch(e){
+    cloud.dirty = true;
+    if (!cloud.offline){ cloud.offline = true; toast('Не вдалося зберегти — немає з’єднання. Спробую ще раз автоматично', {error:true}); }
+    setSync('Не збережено · немає з’єднання');
+    cloud.timer = setTimeout(flush, 15000);
+  }
+  cloud.saving = false;
+  if (cloud.again){ cloud.again = false; flush(); }
+}
+// Періодично підтягує свіжі дані: викладачу — дії учнів і зміни з інших пристроїв, учню — оновлений розклад і ДЗ.
+async function pull(){
+  if (!cloud.on || !booted || cloud.saving || cloud.dirty || document.hidden) return;
+  try {
+    if (isStudent()){
+      if (mode.preview) return;
+      const r = await api('view');
+      if (!sheetEl){ loadStudent(r); render(); }
+      return;
+    }
+    const r = await api('pull');
+    if (cloud.dirty || cloud.saving || isStudent()) return;
+    const changed = r.version !== cloud.version;
+    let n;
+    if (changed){ if (sheetEl) return; n = loadTeacher(r); }
+    else { n = applyActions(r.actions); if (n) queueCloudSave(); }
+    if ((changed || n) && !sheetEl) render();
+    if (n) toast(`Оновлення від учнів: ${n}`);
+  } catch(e){}
+}
+function gate(title, text){
+  document.body.classList.add('gate');
+  $('#main').innerHTML = `<div class="page"><div class="panel" style="max-width:520px;margin:12vh auto 0">${empty(title, text)}</div></div>`;
+}
+function ready(){ document.body.classList.remove('gate'); booted = true; lastRoute = ''; applyTheme(); render(); }
+async function boot(){
+  document.querySelectorAll('[data-act=settings]').forEach(b => b.innerHTML = ic('settings'));
+  if (tg && CLOUD.fn){
+    cloud.on = true; applyTheme();
+    gate('Завантаження…', 'Підключаюся до вашого кабінету.');
+    try {
+      const r = await api('init'); cloud.me = r.me;
+      if (r.role === 'teacher'){
+        const n = loadTeacher(r); ready();
+        if (r.ownInvite) toast('Це ваше власне запрошення — відкрийте його з акаунта учня');
+        else if (n) toast(`Оновлення від учнів: ${n}`);
+      }
+      else if (r.role === 'student'){ loadStudent(r); ready(); }
+      else if (r.role === 'invalid-invite') gate('Запрошення недійсне', 'Посилання застаріло або учня видалено. Попросіть викладача надіслати нове.');
+      else gate('Потрібне запрошення', 'Цей бот — кабінет для учнів викладача. Попросіть у викладача посилання-запрошення й відкрийте його.');
+    } catch(e){
+      cloud.on = false; initRole(); ready();
+      toast(e.status === 401 ? 'Не вдалося перевірити вхід через Telegram — працюю локально на цьому пристрої' : 'Сервер недоступний — працюю локально на цьому пристрої', {error:true, ms:9000});
+    }
+  } else { initRole(); ready(); }
+  setInterval(pull, 30000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) pull(); });
+}
+
+boot();
+setInterval(() => { if (!booted) return; renderNav(); if (route().r === 'home' && !sheetEl && !document.activeElement.matches('input,textarea,select')) render(); }, 60000);
 </script>
 </body>
 </html>
